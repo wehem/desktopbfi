@@ -1,17 +1,43 @@
 #include <windows.h>
 #include <D3dkmthk.h>
 #include <chrono>
+
+#include "strobe-api/strobe/strobe-core.h"
+
 using namespace std::chrono;
 
 const char g_szClassName[] = "desktopBFIwindowClass";
 bool quitProgram = false;
-bool frameVisible = false;
+bool frameVisible;
+
+StrobeAPI* strobe = nullptr;
+char* strobeInfo = (char*)malloc(sizeof(char) * 4096);
+bool debugMode = false;
+int frameSnapshot = 0;
 
 // Window event handling
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC hdc = BeginPaint(hwnd, &ps);
+		if (strobe && debugMode && strobeInfo && strobe->frameCount(StrobeAPI::TotalFrame) - frameSnapshot >= 10)
+		{
+			RECT rec;
+			SetRect(&rec, 10, 10, 500, 600);
+			HBRUSH brush = CreateSolidBrush(RGB(255, 255, 255));
+			FillRect(hdc, &rec, brush);
+			snprintf(strobeInfo, sizeof(char) * 4096, "%s", strobe->getDebugInformation());
+			DrawText(hdc, strobeInfo, strlen(strobeInfo), &rec, DT_TOP | DT_LEFT);
+			frameSnapshot = strobe->frameCount(StrobeAPI::TotalFrame);
+		}
+		EndPaint(hwnd, &ps);
+		ReleaseDC(hwnd, hdc);
+		break;
+	}
 	case WM_CLOSE:
 		quitProgram = true;
 		DestroyWindow(hwnd);
@@ -78,6 +104,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	ShowWindow(hwnd, nCmdShow);
 	UpdateWindow(hwnd);
 
+	LPWSTR* szArglist;
+	int argCount;
+	szArglist = CommandLineToArgvW(GetCommandLineW(), &argCount);
+	if (argCount == 4)
+	{
+		int sMode = _wtoi(szArglist[1]);
+		int pSInterval = _wtoi(szArglist[2]);
+		debugMode = _wtoi(szArglist[3]);
+
+		strobe = new StrobeCore(sMode, pSInterval);
+	}
+	else
+	{
+		strobe = new StrobeCore();
+	}
+
+
 	// Setting up to do V-sync. Guidance came from:
 	// https://www.vsynctester.com/firefoxisbroken.html
 	// https://gist.github.com/anonymous/4397e4909c524c939bee#file-gistfile1-txt-L3
@@ -110,10 +153,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		do {
 			high_resolution_clock::time_point pollTime = high_resolution_clock::now() + microseconds(100);
 			while (pollTime < high_resolution_clock::now())
-				{}
+			{
+			}
 			result = D3DKMTGetScanLine(&gsl);
 		} while (gsl.InVerticalBlank == TRUE);
-		frameVisible = !frameVisible;
+
+		if (strobe)
+			frameVisible = strobe->strobe();
+		else
+			frameVisible = true;
+
 		// Window transparency: 0 is invisible, 255 is opaque
 		SetLayeredWindowAttributes(hwnd, 0, frameVisible * 255, LWA_ALPHA);
 		RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
@@ -123,6 +172,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			DispatchMessage(&Msg);
 		}
 	}
+
+	delete strobeInfo;
+	delete strobe;
 
 	return Msg.wParam;
 }
