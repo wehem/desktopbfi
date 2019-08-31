@@ -164,7 +164,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			frameVisible = true;
 
 		// Window transparency: 0 is invisible, 255 is opaque
-		SetLayeredWindowAttributes(hwnd, 0, frameVisible * 255, LWA_ALPHA);
+		SetLayeredWindowAttributes(hwnd, 0, (frameVisible ? 0 : 1) * 255, LWA_ALPHA);
 		RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
 
 		while (PeekMessage(&Msg, NULL, 0, 0, PM_REMOVE) > 0) {
