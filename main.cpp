@@ -2,12 +2,16 @@
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <chrono>
+#include <wrl.h>
+#include <thread>
+#include <vector>
 
 #include "strobe-api/strobe/strobe-core.h"
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 
+using namespace Microsoft::WRL;
 using namespace std::chrono;
 
 const char g_szClassName[] = "desktopBFIwindowClass";
@@ -19,10 +23,17 @@ char* strobeInfo = (char*)malloc(sizeof(char) * 4096);
 bool debugMode = false;
 int frameSnapshot = 0;
 
-ID3D12Device* d3d12Device = nullptr;
-IDXGIFactory4* dxgiFactory = nullptr;
-IDXGIAdapter1* dxgiAdapter = nullptr;
-IDXGIOutput* dxgiOutput = nullptr;
+// DirectX 12 objects
+ComPtr<ID3D12Device> d3d12Device;
+ComPtr<IDXGIFactory4> dxgiFactory;
+ComPtr<IDXGIAdapter1> dxgiAdapter;
+ComPtr<IDXGIOutput> dxgiOutput;
+ComPtr<ID3D12CommandQueue> commandQueue;
+ComPtr<ID3D12CommandAllocator> commandAllocator;
+ComPtr<ID3D12GraphicsCommandList> commandList;
+ComPtr<ID3D12Fence> fence;
+HANDLE fenceEvent;
+UINT64 fenceValue = 0;
 
 // Window event handling
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -61,6 +72,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
+void WaitForPreviousFrame()
+{
+    const UINT64 currentFenceValue = fenceValue;
+    commandQueue->Signal(fence.Get(), currentFenceValue);
+    fenceValue++;
+
+    if (fence->GetCompletedValue() < currentFenceValue)
+    {
+        fence->SetEventOnCompletion(currentFenceValue, fenceEvent);
+        WaitForSingleObject(fenceEvent, INFINITE);
+    }
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     LPSTR lpCmdLine, int nCmdShow)
 {
@@ -97,7 +121,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         g_szClassName,
         "DesktopBFI",
         WS_POPUP,
-        0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+		0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
         NULL, NULL, hInstance, NULL);
 
     if (hwnd == NULL)
@@ -148,11 +172,58 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 0;
     }
 
-    hr = D3D12CreateDevice(dxgiAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d12Device));
+    hr = D3D12CreateDevice(dxgiAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d12Device));
     if (FAILED(hr))
     {
         MessageBox(NULL, "Failed to create D3D12 Device!", "Error!", MB_ICONEXCLAMATION | MB_OK);
         return 0;
+    }
+
+    // Create command queue
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+
+    hr = d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
+    if (FAILED(hr))
+    {
+        MessageBox(NULL, "Failed to create command queue!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Create command allocator and command list
+    hr = d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+    if (FAILED(hr))
+    {
+        MessageBox(NULL, "Failed to create command allocator!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    hr = d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
+    if (FAILED(hr))
+    {
+        MessageBox(NULL, "Failed to create command list!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+
+    // Create synchronization objects
+    hr = d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+    if (FAILED(hr))
+    {
+        MessageBox(NULL, "Failed to create fence!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
+    }
+    fenceValue = 1;
+
+    fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (fenceEvent == nullptr)
+    {
+        hr = HRESULT_FROM_WIN32(GetLastError());
+        if (FAILED(hr))
+        {
+            MessageBox(NULL, "Failed to create fence event!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+            return 0;
+        }
     }
 
     while (!quitProgram)
@@ -167,16 +238,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
         // Poll for VBlank exit
         BOOL inVBlank = TRUE;
-        do {
+		do {
             high_resolution_clock::time_point pollTime = high_resolution_clock::now() + microseconds(100);
             while (pollTime > high_resolution_clock::now())
             {
+                // Busy-waiting for the poll time to elapse
             }
             DXGI_OUTPUT_DESC outputDesc;
             dxgiOutput->GetDesc(&outputDesc);
             inVBlank = outputDesc.DesktopCoordinates.bottom == 0; // Assuming VBlank when desktop coordinates are 0
         } while (inVBlank);
 
+        // Record commands
+        commandAllocator->Reset();
+        commandList->Reset(commandAllocator.Get(), nullptr);
+
+        // Here you would add commands to the command list
+        // For example, transitioning resources, setting pipeline states, etc.
+
+        commandList->Close();
+
+        // Execute the command list
+        ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+        commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+        // Present the frame (this is where you would integrate with your strobe logic)
         if (strobe)
             frameVisible = strobe->strobe();
         else
@@ -185,7 +271,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         // Window transparency: 0 is invisible, 255 is opaque
         SetLayeredWindowAttributes(hwnd, 0, (frameVisible ? 0 : 1) * 255, LWA_ALPHA);
         RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE);
-		while (PeekMessage(&Msg, NULL, 0, 0, PM_REMOVE) > 0) {
+
+        // Wait for the frame to be presented
+        WaitForPreviousFrame();
+
+        // Handle window messages
+        while (PeekMessage(&Msg, NULL, 0, 0, PM_REMOVE) > 0) {
             TranslateMessage(&Msg);
             DispatchMessage(&Msg);
         }
@@ -204,29 +295,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         strobe = nullptr;
     }
 
-    if (dxgiOutput)
-    {
-        dxgiOutput->Release();
-        dxgiOutput = nullptr;
-    }
-
-    if (dxgiAdapter)
-    {
-        dxgiAdapter->Release();
-        dxgiAdapter = nullptr;
-    }
-
-    if (dxgiFactory)
-    {
-        dxgiFactory->Release();
-        dxgiFactory = nullptr;
-    }
-
-    if (d3d12Device)
-    {
-        d3d12Device->Release();
-        d3d12Device = nullptr;
-    }
+    CloseHandle(fenceEvent);
 
     return (int)Msg.wParam;
 }
