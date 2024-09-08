@@ -1,7 +1,7 @@
 #include <windows.h>
 #include <D3dkmthk.h>
 #include <chrono>
-#include <memory>
+#include "strobe-api/strobe/strobe-core.h" 
 
 using namespace std::chrono;
 
@@ -155,6 +155,7 @@ int RunMainLoop(HWND hwnd)
         }
     }
 
+    delete[] strobeInfo;
     return Msg.wParam;
 }
 
