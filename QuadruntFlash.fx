@@ -5,7 +5,7 @@ uniform float FRAME_RATE <
     ui_min = 30.0; ui_max = 240.0; ui_step = 1.0;
     ui_label = "Frame Rate";
     ui_tooltip = "The frame rate of the alternation effect";
-> = 100.0;
+> = 60.0;
 
 uniform float CYCLE_LENGTH <
     ui_type = "slider";
@@ -19,7 +19,7 @@ uniform float2 CHECKERBOARD_SIZE <
     ui_min = 1.0; ui_max = 100.0; ui_step = 1.0;
     ui_label = "Checkerboard Size";
     ui_tooltip = "Size of the checkerboard squares (width, height)";
-> = float2(2.0, 2.0);
+> = float2(1.0, 1.0);
 
 uniform float2 CHECKERBOARD_OFFSET <
     ui_type = "slider";
