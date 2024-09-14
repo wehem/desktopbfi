@@ -1,7 +1,5 @@
 #include "ReShade.fxh"
 
-//I dont know why the fuck no one done it
-
 uniform float OVERDRIVE_STRENGTH <
     ui_type = "slider";
     ui_min = 0.0; ui_max = 1.0; ui_step = 0.01;
