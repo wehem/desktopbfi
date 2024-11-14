@@ -190,7 +190,7 @@ float3 VariableOverdriveLookup(float3 prev2, float3 prev1, float3 current,
     
     // Calculate overdrive with more conservative strength
     float refreshRate = 1000.0 / currentFrameTime;
-    float strength = GetOverdriveStrength(refreshRate) * 0.5; // Reduced strength
+    float strength = GetOverdriveStrength(refreshRate)
     
     // More conservative overdrive calculation
     float3 diff = predicted - current;
